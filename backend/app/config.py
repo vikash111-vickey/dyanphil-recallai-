@@ -11,17 +11,23 @@ class Settings(BaseSettings):
     )
 
     data_dir: Path = Field(
-        default=Path("data"),
+        default=Path(r"D:\prompteng\data"),
         description="Directory for application data, indices, and persistent state",
     )
-    db_path: Path = Field(
-        default=Path("data/dyanphil.db"),
-        description="Path to the SQLite database file",
+    db_path: Path | None = Field(
+        default=None,
+        description="Path to the SQLite database file (defaults to <data_dir>/recall.db)",
     )
     folders_to_index: list[Path] = Field(
         default_factory=list,
         description="List of local folder paths to index",
     )
+
+    @property
+    def resolved_db_path(self) -> Path:
+        if self.db_path is not None:
+            return self.db_path
+        return self.data_dir / "recall.db"
 
 
 settings = Settings()

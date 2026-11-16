@@ -46,3 +46,4 @@ This document maintains a running log of foundational decisions, architectural p
 | 2026-11-16 | Model & Framework Ban | No PyTorch, no Ollama, no sentence-transformers, no models > 500 MB. | Severe host disk constraints; prioritize small footprint, fast boot times, and CPU execution. |
 | 2026-11-16 | Embeddings | FastEmbed (ONNX) behind an abstract swappable interface. | Sub-500 MB footprint, CPU optimized, no PyTorch dependency. |
 | 2026-11-16 | LLM Strategy | Pluggable interface; cloud opt-in first; search fully operational without LLM. | Ensures privacy-first guarantee while providing resilience against missing API keys or lack of local GPU/disk. |
+| 2026-11-16 | File Indexer & Storage | SQLite with FTS5 (`unicode61 remove_diacritics 2`), automated sync triggers, and pure-Python extractors (`pypdf`, `python-docx`, `openpyxl` read-only). | Lean disk usage, zero external server overhead, zero network dependency, automated cascading consistency. |
