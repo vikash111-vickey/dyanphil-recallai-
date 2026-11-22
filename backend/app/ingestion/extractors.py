@@ -2,22 +2,30 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import io
+import logging
+import warnings
+from contextlib import redirect_stderr
 from pathlib import Path
 
+# Silence pypdf logger noise
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 
-@dataclass
-class ExtractionResult:
-    text: str
-    status: str  # "indexed", "empty", "needs_ocr", "unsupported", "error"
-    error: str | None = None
+SUPPORTED_EXTENSIONS = {
+    ".txt",
+    ".md",
+    ".csv",
+    ".pdf",
+    ".docx",
+    ".xlsx",
+    ".png",
+    ".jpg",
+    ".jpeg",
+}
 
 
-SUPPORTED_EXTENSIONS = {".txt", ".md", ".csv", ".pdf", ".docx", ".xlsx"}
-
-
-def extract_text_file(path: Path) -> str:
-    """Extract plain text handling utf-8 and falling back to latin-1."""
+def _extract_plain(path: Path) -> str:
+    """Extract plain text trying UTF-8 first, falling back to Latin-1."""
     data = path.read_bytes()
     try:
         return data.decode("utf-8")
@@ -25,21 +33,30 @@ def extract_text_file(path: Path) -> str:
         return data.decode("latin-1")
 
 
-def extract_pdf(path: Path) -> str:
-    """Extract text from PDF pages using pypdf."""
+def _extract_pdf(path: Path) -> tuple[str, str, str | None]:
+    """Extract text from PDF using pypdf. Suppresses warnings and stderr noise."""
     from pypdf import PdfReader
 
-    reader = PdfReader(str(path))
-    parts: list[str] = []
-    for page in reader.pages:
-        page_text = page.extract_text()
-        if page_text:
-            parts.append(page_text)
-    return "\n".join(parts)
+    stderr_sink = io.StringIO()
+    with redirect_stderr(stderr_sink), warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        logging.getLogger("pypdf").setLevel(logging.ERROR)
+
+        reader = PdfReader(str(path))
+        parts: list[str] = []
+        for page in reader.pages:
+            page_text = page.extract_text()
+            if page_text:
+                parts.append(page_text)
+
+    full_text = "\n".join(parts).strip()
+    if not full_text:
+        return ("needs_ocr", "", None)
+    return ("indexed", full_text, None)
 
 
-def extract_docx(path: Path) -> str:
-    """Extract paragraphs and table text from DOCX using python-docx."""
+def _extract_docx(path: Path) -> str:
+    """Extract text from DOCX paragraphs and tables using python-docx."""
     import docx
 
     doc = docx.Document(str(path))
@@ -51,15 +68,15 @@ def extract_docx(path: Path) -> str:
 
     for table in doc.tables:
         for row in table.rows:
-            cell_texts = [cell.text.strip() for cell in row.cells if cell.text and cell.text.strip()]
-            if cell_texts:
-                parts.append(" | ".join(cell_texts))
+            row_cells = [cell.text.strip() for cell in row.cells if cell.text and cell.text.strip()]
+            if row_cells:
+                parts.append(" ".join(row_cells))
 
-    return "\n".join(parts)
+    return "\n".join(parts).strip()
 
 
-def extract_xlsx(path: Path) -> str:
-    """Extract cell values from XLSX using openpyxl in read-only mode."""
+def _extract_xlsx(path: Path) -> str:
+    """Extract cell values from XLSX in read-only mode joining with spaces."""
     import openpyxl
 
     wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
@@ -67,57 +84,126 @@ def extract_xlsx(path: Path) -> str:
     try:
         for sheet in wb.worksheets:
             for row in sheet.iter_rows(values_only=True):
-                cell_values = [str(val).strip() for val in row if val is not None and str(val).strip()]
-                if cell_values:
-                    lines.append(" ".join(cell_values))
+                cells = [str(cell).strip() for cell in row if cell is not None and str(cell).strip()]
+                if cells:
+                    lines.append(" ".join(cells))
     finally:
         wb.close()
 
-    return "\n".join(lines)
+    return "\n".join(lines).strip()
 
 
-def extract_file(path: Path) -> ExtractionResult:
+def extract_text(path: Path) -> tuple[str, str, str | None]:
     """
     Extract text from a file based on its extension.
-    Never crashes on corrupt files; records status and error safely.
+
+    Returns:
+        tuple[str, str, str | None]: (status, text, error)
+        status values: "indexed", "empty", "needs_ocr", "unsupported", "error"
     """
+    path = Path(path)
     ext = path.suffix.lower()
+
     if ext not in SUPPORTED_EXTENSIONS:
-        return ExtractionResult(
-            text="",
-            status="unsupported",
-            error=f"Unsupported file extension: '{ext}'",
-        )
+        return ("unsupported", "", None)
 
     try:
         if ext in {".txt", ".md", ".csv"}:
-            raw_text = extract_text_file(path)
+            text = _extract_plain(path)
         elif ext == ".pdf":
-            raw_text = extract_pdf(path)
-            cleaned = raw_text.strip()
-            if not cleaned:
-                return ExtractionResult(text="", status="needs_ocr")
-            return ExtractionResult(text=cleaned, status="indexed")
+            return _extract_pdf(path)
+        elif ext in {".png", ".jpg", ".jpeg"}:
+            return ("needs_ocr", "", None)
         elif ext == ".docx":
-            raw_text = extract_docx(path)
+            text = _extract_docx(path)
         elif ext == ".xlsx":
-            raw_text = extract_xlsx(path)
+            text = _extract_xlsx(path)
         else:
-            return ExtractionResult(
-                text="",
-                status="unsupported",
-                error=f"Unsupported file extension: '{ext}'",
-            )
+            return ("unsupported", "", None)
 
-        cleaned = raw_text.strip()
+        cleaned = text.strip()
         if not cleaned:
-            return ExtractionResult(text="", status="empty")
+            return ("empty", "", None)
 
-        return ExtractionResult(text=cleaned, status="indexed")
+        return ("indexed", cleaned, None)
 
     except Exception as exc:
-        return ExtractionResult(
-            text="",
-            status="error",
-            error=f"{type(exc).__name__}: {str(exc)}",
-        )
+        return ("error", "", f"{type(exc).__name__}: {str(exc)}")
+
+
+def extract_text_from_bytes(data: bytes, filename: str) -> tuple[str, str, str | None]:
+    """
+    Extract text in-memory from bytes for attachments (pdf, docx, xlsx, txt).
+    Never writes to disk.
+    Returns: (status, text, error)
+    """
+    ext = Path(filename).suffix.lower()
+    if ext not in {".txt", ".md", ".csv", ".pdf", ".docx", ".xlsx"}:
+        return ("unsupported", "", None)
+
+    try:
+        if ext in {".txt", ".md", ".csv"}:
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                text = data.decode("latin-1")
+            cleaned = text.strip()
+            return ("indexed", cleaned, None) if cleaned else ("empty", "", None)
+
+        elif ext == ".pdf":
+            from pypdf import PdfReader
+
+            stderr_sink = io.StringIO()
+            with redirect_stderr(stderr_sink), warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                logging.getLogger("pypdf").setLevel(logging.ERROR)
+
+                reader = PdfReader(io.BytesIO(data))
+                parts: list[str] = []
+                for page in reader.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        parts.append(page_text)
+
+            full_text = "\n".join(parts).strip()
+            if not full_text:
+                return ("empty", "", None)
+            return ("indexed", full_text, None)
+
+        elif ext == ".docx":
+            import docx
+
+            doc = docx.Document(io.BytesIO(data))
+            parts = []
+            for paragraph in doc.paragraphs:
+                if paragraph.text and paragraph.text.strip():
+                    parts.append(paragraph.text.strip())
+            for table in doc.tables:
+                for row in table.rows:
+                    row_cells = [cell.text.strip() for cell in row.cells if cell.text and cell.text.strip()]
+                    if row_cells:
+                        parts.append(" ".join(row_cells))
+            full_text = "\n".join(parts).strip()
+            return ("indexed", full_text, None) if full_text else ("empty", "", None)
+
+        elif ext == ".xlsx":
+            import openpyxl
+
+            wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+            lines: list[str] = []
+            try:
+                for sheet in wb.worksheets:
+                    for row in sheet.iter_rows(values_only=True):
+                        cells = [str(cell).strip() for cell in row if cell is not None and str(cell).strip()]
+                        if cells:
+                            lines.append(" ".join(cells))
+            finally:
+                wb.close()
+            full_text = "\n".join(lines).strip()
+            return ("indexed", full_text, None) if full_text else ("empty", "", None)
+
+        return ("unsupported", "", None)
+
+    except Exception as exc:
+        return ("error", "", f"{type(exc).__name__}: {str(exc)}")
+

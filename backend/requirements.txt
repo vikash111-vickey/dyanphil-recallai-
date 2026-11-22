@@ -6,3 +6,13 @@ httpx
 pypdf
 python-docx
 openpyxl
+fastembed
+numpy
+rapidocr-onnxruntime
+pypdfium2
+watchdog
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+keyring
+beautifulsoup4

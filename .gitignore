@@ -38,11 +38,18 @@ backend/.env
 !backend/.env.example
 
 # Application Data & Databases
+.pytest_temp/
+prompteng.pytest_temp/
+backend/prompteng.pytest_temp/
+*.pytest_temp/
 data/
 backend/data/
 *.db
 *.sqlite
 *.sqlite3
+
+# Firebase Cache
+.firebase/
 
 # Node / UI
 node_modules/
