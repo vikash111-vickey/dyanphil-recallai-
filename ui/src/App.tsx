@@ -509,7 +509,7 @@ export default function App() {
           <div
             className={`pointer-events-none absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-2.5 transition-all duration-300 ${
               currentPhase === "answered"
-                ? "top-[calc(46%+76px)]"
+                ? "top-[calc(46%+94px)]"
                 : "top-[calc(46%-12px)]"
             }`}
           >

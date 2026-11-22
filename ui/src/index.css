@@ -220,7 +220,7 @@
 .mo-root {
   position: relative;
   width: 100%;
-  min-height: 100vh;
+  min-height: calc(100vh - 90px);
   overflow: hidden;
   background: #050508;
   color: #f4f4f5;
@@ -234,7 +234,7 @@
 }
 
 .mo-root[data-phase="answered"] {
-  min-height: 500px;
+  min-height: 520px;
 }
 
 .mo-bg {
@@ -564,9 +564,26 @@
   overflow: hidden;
 }
 
+.mo-root[data-phase="answered"] .mo-actor {
+  width: min(500px, calc(100vw - 32px)) !important;
+  height: auto !important;
+  min-height: 114px !important;
+  border-radius: 20px !important;
+}
+
 .mo-root[data-phase="answered"] .mo-answer {
+  position: relative !important;
+  inset: auto !important;
+  width: 100% !important;
+  padding: 16px 20px !important;
+  overflow: visible !important;
   pointer-events: auto;
   z-index: 8;
+}
+
+.mo-root[data-phase="answered"] .mo-a-body {
+  overflow: visible !important;
+  max-height: none !important;
 }
 
 .mo-root[data-phase="answered"] .mo-input {
@@ -700,7 +717,7 @@
 .mo-reset {
   position: absolute;
   left: 50%;
-  top: calc(46% + 28px);
+  top: calc(46% + 46px);
   transform: translateX(-50%);
   display: none;
   align-items: center;
