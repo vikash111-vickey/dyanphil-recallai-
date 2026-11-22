@@ -250,6 +250,8 @@ function ResultCard({
         return "bg-rose-500/10 text-rose-400 border-rose-500/30";
       case "research":
         return "bg-blue-500/15 text-blue-300 border-blue-500/40";
+      case "ieee":
+        return "bg-sky-500/20 text-sky-300 border-sky-500/50 font-semibold";
       case "knowledge":
         return "bg-emerald-500/15 text-emerald-300 border-emerald-500/40";
       default:
@@ -342,11 +344,19 @@ function ResultCard({
                   href={item.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-300 transition-colors hover:bg-blue-500/20 hover:text-white"
-                  title="Open paper or article in web browser"
+                  className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                    item.source === "IEEE Xplore" || item.match_type === "ieee"
+                      ? "border-sky-500/50 bg-sky-500/15 text-sky-200 hover:bg-sky-500/30 hover:text-white"
+                      : "border-blue-500/40 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 hover:text-white"
+                  }`}
+                  title="Open paper or publication in web browser"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
-                  <span>Read online</span>
+                  <span>
+                    {item.source === "IEEE Xplore" || item.match_type === "ieee"
+                      ? "Open in IEEE Xplore"
+                      : "Read online"}
+                  </span>
                 </a>
               )}
               {item.pdf_url && (
@@ -479,8 +489,34 @@ export function ResultsPanel({ data, onPinToVault }: ResultsPanelProps) {
     );
   }
 
+  const hasIeeeOrResearch = data.results.some(
+    (it) => it.source === "IEEE Xplore" || it.match_type === "ieee" || it.doc_type === "ieee_paper" || it.doc_type === "research_paper"
+  );
+
   return (
     <div className="w-full space-y-3.5 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      {/* IEEE Xplore & Research Library Bar */}
+      {hasIeeeOrResearch && (
+        <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-xl border border-sky-500/30 bg-gradient-to-r from-sky-950/50 via-zinc-950 to-zinc-950 text-xs text-sky-200 shadow-md">
+          <div className="flex items-center gap-2">
+            <Globe className="w-4 h-4 text-sky-400 shrink-0" />
+            <span>
+              Scholarly publications retrieved from <strong>IEEE Xplore</strong>, <strong>arXiv</strong>, and academic journals.
+            </span>
+          </div>
+          <a
+            href="https://ieeexplore.ieee.org/Xplore/home.jsp"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white px-3 py-1.5 text-xs font-semibold shadow-sm transition-all active:scale-95 shrink-0"
+            title="Open IEEE Xplore Digital Library home"
+          >
+            <span>IEEE Xplore Home</span>
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        </div>
+      )}
+
       <div className="flex items-center justify-between px-1">
         <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
           Results ({data.results.length})

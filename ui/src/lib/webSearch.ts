@@ -1,4 +1,4 @@
-// Internet & Research Paper Search Engine (arXiv + Wikipedia + Optional Gemini AI)
+// Internet & Scholarly Research Engine (IEEE Xplore + OpenAlex + arXiv + Wikipedia + Optional Gemini AI)
 import { AskResponse, SearchResultItem } from "@/components/ResultsPanel";
 import { maskSensitiveData } from "@/lib/masking";
 
@@ -18,10 +18,167 @@ export function saveApiKey(key: string): void {
   }
 }
 
+function cleanHtmlTags(str: string): string {
+  if (!str) return "";
+  return str.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Search IEEE Xplore publications via official CrossRef DOI prefix 10.1109
+ * (covers IEEE Transactions, Journals, Magazines, and Conferences)
+ */
+async function searchIeeeXplore(query: string, maxResults = 4): Promise<SearchResultItem[]> {
+  const cleanQ = encodeURIComponent(query.trim());
+  // Search IEEE works specifically
+  const url = `https://api.crossref.org/works?query=${cleanQ}&filter=prefix:10.1109&rows=${maxResults * 2}`;
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    const items = data?.message?.items || [];
+
+    const results: SearchResultItem[] = [];
+
+    for (const it of items) {
+      if (results.length >= maxResults) break;
+      const title = it.title?.[0] || "IEEE Publication";
+      // Skip generic committee / index / title pages
+      if (/organizing committee|program committee|table of contents|author index|preface/i.test(title)) {
+        continue;
+      }
+
+      // Authors
+      const authors = (it.author || [])
+        .map((a: any) => `${a.given || ""} ${a.family || ""}`.trim())
+        .filter(Boolean);
+      const authorsStr = authors.slice(0, 3).join(", ") + (authors.length > 3 ? " et al." : "");
+
+      const container = it["container-title"]?.[0] || "IEEE Xplore";
+      const doi = it.DOI || "";
+      const year = it.issued?.["date-parts"]?.[0]?.[0] || it.created?.["date-parts"]?.[0]?.[0] || "";
+
+      // Construct accurate IEEE Xplore document link
+      let ieeeUrl = it.resource?.primary?.URL;
+      if (!ieeeUrl || !ieeeUrl.includes("ieeexplore.ieee.org")) {
+        ieeeUrl = doi ? `https://doi.org/${doi}` : `https://ieeexplore.ieee.org/search/searchresult.jsp?newsearch=true&queryText=${cleanQ}`;
+      }
+
+      let pdfUrl = "";
+      if (it.link && Array.isArray(it.link)) {
+        for (const l of it.link) {
+          if (l.URL && l.URL.includes(".pdf")) {
+            pdfUrl = l.URL;
+            break;
+          }
+        }
+      }
+
+      const rawAbstract = cleanHtmlTags(it.abstract || "");
+      const snippet = rawAbstract
+        ? rawAbstract.slice(0, 320) + (rawAbstract.length > 320 ? "..." : "")
+        : `Published in ${container}${year ? ` (${year})` : ""}. IEEE DOI: ${doi || "10.1109"}. Access full text and citations on IEEE Xplore.`;
+
+      results.push({
+        filename: `${title}.pdf`,
+        path: ieeeUrl,
+        breadcrumb: ["Internet", "IEEE Xplore", container.slice(0, 35), `${title.slice(0, 30)}...`],
+        source: "IEEE Xplore",
+        modified: year ? String(year) : "Recent",
+        snippet,
+        match_type: "ieee",
+        exists: true,
+        doc_type: "ieee_paper",
+        url: ieeeUrl,
+        pdf_url: pdfUrl,
+        facts: [
+          { kind: "journal", label: "IEEE Venue", value: container.slice(0, 50) },
+          { kind: "authors", label: "Authors", value: authorsStr || "IEEE Authors" },
+          { kind: "doi", label: "DOI", value: doi || "10.1109" },
+        ],
+      });
+    }
+
+    return results;
+  } catch (err) {
+    console.warn("IEEE Xplore search failed:", err);
+    return [];
+  }
+}
+
+/**
+ * Search OpenAlex global scholarly database (covers Nature, Science, ACM, Springer, Elsevier, Oxford)
+ */
+async function searchOpenAlex(query: string, maxResults = 3): Promise<SearchResultItem[]> {
+  const cleanQ = encodeURIComponent(query.trim());
+  const url = `https://api.openalex.org/works?search=${cleanQ}&per-page=${maxResults}`;
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    const works = data?.results || [];
+
+    const items: SearchResultItem[] = [];
+
+    for (const w of works) {
+      const title = w.display_name || w.title || "Academic Research Paper";
+      const pubYear = w.publication_year ? String(w.publication_year) : "";
+      const publisher = w.primary_location?.source?.display_name || "Peer-Reviewed Academic Publisher";
+
+      // Landing page & open-access PDF
+      const landingUrl = w.primary_location?.landing_page_url || (w.doi ? `https://doi.org/${w.doi.replace(/^https?:\/\/doi.org\//, "")}` : w.id);
+      const pdfUrl = w.open_access?.oa_url || w.primary_location?.pdf_url || "";
+
+      // Authors
+      const authors = (w.authorships || [])
+        .map((a: any) => a.author?.display_name)
+        .filter(Boolean)
+        .slice(0, 3)
+        .join(", ");
+
+      const topic = w.primary_topic?.display_name || "";
+      const field = w.primary_topic?.field?.display_name || "";
+      const citedCount = w.cited_by_count ? `Cited by ${w.cited_by_count} papers` : "";
+
+      const snippet = [
+        topic ? `Research Area: ${topic}.` : "",
+        field ? `Field: ${field}.` : "",
+        citedCount ? `${citedCount}.` : "",
+        `Published in ${publisher}.`,
+      ].filter(Boolean).join(" ");
+
+      items.push({
+        filename: `${title}.pdf`,
+        path: landingUrl || w.id,
+        breadcrumb: ["Internet", "Scholarly Index", publisher.slice(0, 30), `${title.slice(0, 30)}...`],
+        source: publisher.slice(0, 30) || "Academic Research",
+        modified: pubYear || "Recent",
+        snippet: snippet || `Published in ${publisher}. Access full peer-reviewed text online.`,
+        match_type: "research",
+        exists: true,
+        doc_type: "research_paper",
+        url: landingUrl || w.id,
+        pdf_url: pdfUrl,
+        facts: [
+          { kind: "authors", label: "Authors", value: authors || "Researchers" },
+          { kind: "publisher", label: "Publisher", value: publisher.slice(0, 40) },
+          { kind: "date", label: "Year", value: pubYear, value_date: pubYear },
+        ],
+      });
+    }
+
+    return items;
+  } catch (err) {
+    console.warn("OpenAlex search failed:", err);
+    return [];
+  }
+}
+
 /**
  * Search scientific research papers from arXiv via their public OpenSearch API
  */
-async function searchArxiv(query: string, maxResults = 5): Promise<SearchResultItem[]> {
+async function searchArxiv(query: string, maxResults = 3): Promise<SearchResultItem[]> {
   const cleanQ = encodeURIComponent(query.trim());
   const url = `https://export.arxiv.org/api/query?search_query=all:${cleanQ}&start=0&max_results=${maxResults}&sortBy=relevance`;
 
@@ -41,7 +198,6 @@ async function searchArxiv(query: string, maxResults = 5): Promise<SearchResultI
       const published = entry.querySelector("published")?.textContent?.slice(0, 10) || "";
       const idUrl = entry.querySelector("id")?.textContent?.trim() || "";
 
-      // Extract direct links
       let paperUrl = idUrl;
       let pdfUrl = "";
       const links = Array.from(entry.querySelectorAll("link"));
@@ -58,13 +214,10 @@ async function searchArxiv(query: string, maxResults = 5): Promise<SearchResultI
         pdfUrl = idUrl.replace("/abs/", "/pdf/") + ".pdf";
       }
 
-      // Authors
       const authors = Array.from(entry.querySelectorAll("author > name"))
         .map((n) => n.textContent?.trim() || "")
         .filter(Boolean);
       const authorsStr = authors.slice(0, 3).join(", ") + (authors.length > 3 ? " et al." : "");
-
-      // Primary Category
       const cat = entry.querySelector("primary_category")?.getAttribute("term") || "Research";
 
       items.push({
@@ -95,9 +248,9 @@ async function searchArxiv(query: string, maxResults = 5): Promise<SearchResultI
 }
 
 /**
- * Search Wikipedia for encyclopedic background and topic information
+ * Search Wikipedia for encyclopedic background and definitions
  */
-async function searchWikipedia(query: string, maxResults = 3): Promise<SearchResultItem[]> {
+async function searchWikipedia(query: string, maxResults = 2): Promise<SearchResultItem[]> {
   const cleanQ = encodeURIComponent(query.trim());
   const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${cleanQ}&format=json&origin=*&srlimit=${maxResults}`;
 
@@ -109,7 +262,7 @@ async function searchWikipedia(query: string, maxResults = 3): Promise<SearchRes
 
     return hits.map((hit: any) => {
       const title = hit.title || "Wikipedia Article";
-      const cleanSnippet = (hit.snippet || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+      const cleanSnippet = cleanHtmlTags(hit.snippet || "");
       const pageUrl = `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/\s+/g, "_"))}`;
       const pubDate = (hit.timestamp || "").slice(0, 10);
 
@@ -117,7 +270,7 @@ async function searchWikipedia(query: string, maxResults = 3): Promise<SearchRes
         filename: `${title}.html`,
         path: pageUrl,
         breadcrumb: ["Internet", "Knowledge", "Wikipedia", title],
-        source: "Wikipedia Knowledge",
+        source: "Wikipedia",
         modified: pubDate,
         snippet: cleanSnippet || `Encyclopedic information regarding ${title}.`,
         match_type: "knowledge",
@@ -144,19 +297,19 @@ async function askGemini(apiKey: string, question: string, contextItems: SearchR
   if (!apiKey.trim()) return "";
 
   const contextText = contextItems
-    .slice(0, 5)
+    .slice(0, 6)
     .map(
       (item, i) =>
         `[Source ${i + 1}]: "${item.filename}" (${item.source}, ${item.modified})\nAbstract/Summary: ${item.snippet}\nLink: ${item.url || item.path}`
     )
     .join("\n\n");
 
-  const prompt = `You are Dyanphil Research AI. A user asked: "${question}".
+  const prompt = `You are Dyanphil Scientific Research Assistant. A user asked: "${question}".
 
-Here are the top scientific papers and web sources retrieved for this query:
+Here are peer-reviewed research papers and scholarly sources retrieved from IEEE Xplore, OpenAlex, arXiv, and encyclopedic literature:
 ${contextText}
 
-Provide a direct, thorough, and well-structured answer explaining the requested concepts, citing specific papers or sources by name, and highlighting key findings. Keep it factual, informative, and easy to read.`;
+Provide an authoritative, clear, and comprehensive answer explaining the concepts, citing the relevant papers (especially IEEE Xplore or journal publications) by name with their key findings. Include technical details requested by the user.`;
 
   try {
     const res = await fetch(
@@ -168,14 +321,14 @@ Provide a direct, thorough, and well-structured answer explaining the requested 
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: 0.3,
-            maxOutputTokens: 1000,
+            maxOutputTokens: 1200,
           },
         }),
       }
     );
 
     if (!res.ok) {
-      console.warn("Gemini API returned error:", res.status);
+      console.warn("Gemini API error status:", res.status);
       return "";
     }
 
@@ -189,7 +342,7 @@ Provide a direct, thorough, and well-structured answer explaining the requested 
 }
 
 /**
- * Execute Internet & Research Paper search across arXiv, Wikipedia, and optional Gemini synthesis
+ * Execute deep Internet & Scholarly Research across IEEE Xplore, OpenAlex, arXiv, Wikipedia & Gemini AI
  */
 export async function performInternetSearch(query: string, sessionId: string): Promise<AskResponse> {
   const rawQ = (query || "").trim();
@@ -197,25 +350,39 @@ export async function performInternetSearch(query: string, sessionId: string): P
     return {
       tone: "neutral",
       urgency: "normal",
-      message: "Please enter a research topic, academic subject, or question to search the internet and research papers.",
+      message: "Please enter any research question or topic (e.g. quantum computing, deep learning, wireless networks, biomedical algorithms) to search IEEE Xplore, arXiv, and the internet.",
       session_id: sessionId,
       results: [],
     };
   }
 
-  // 1. Fetch from arXiv and Wikipedia in parallel
-  const [arxivResults, wikiResults] = await Promise.all([
-    searchArxiv(rawQ, 4),
-    searchWikipedia(rawQ, 3),
+  // 1. Fetch from IEEE Xplore, OpenAlex, arXiv, and Wikipedia simultaneously
+  const [ieeeRes, openAlexRes, arxivRes, wikiRes] = await Promise.allSettled([
+    searchIeeeXplore(rawQ, 4),
+    searchOpenAlex(rawQ, 3),
+    searchArxiv(rawQ, 3),
+    searchWikipedia(rawQ, 2),
   ]);
 
-  const combinedResults: SearchResultItem[] = [...arxivResults, ...wikiResults];
+  const ieeeItems = ieeeRes.status === "fulfilled" ? ieeeRes.value : [];
+  const openAlexItems = openAlexRes.status === "fulfilled" ? openAlexRes.value : [];
+  const arxivItems = arxivRes.status === "fulfilled" ? arxivRes.value : [];
+  const wikiItems = wikiRes.status === "fulfilled" ? wikiRes.value : [];
+
+  // IEEE papers prioritized first, then open research, then arXiv, then Wikipedia
+  const combinedResults: SearchResultItem[] = [
+    ...ieeeItems,
+    ...openAlexItems,
+    ...arxivItems,
+    ...wikiItems,
+  ];
 
   if (combinedResults.length === 0) {
+    const ieeePortalLink = `https://ieeexplore.ieee.org/search/searchresult.jsp?newsearch=true&queryText=${encodeURIComponent(rawQ)}`;
     return {
       tone: "neutral",
       urgency: "normal",
-      message: `No online research papers or encyclopedia entries were found for "${rawQ}". Try searching with alternate academic terms or check your internet connection.`,
+      message: `No direct scientific papers were found for "${rawQ}". You can search IEEE Xplore directly at: ${ieeePortalLink}`,
       session_id: sessionId,
       results: [],
     };
@@ -232,9 +399,13 @@ export async function performInternetSearch(query: string, sessionId: string): P
   if (aiSummary) {
     finalMessage = aiSummary;
   } else {
-    const paperCount = arxivResults.length;
-    const wikiCount = wikiResults.length;
-    finalMessage = `Found ${combinedResults.length} online research source(s) for "${rawQ}" (${paperCount} arXiv research paper${paperCount === 1 ? "" : "s"}, ${wikiCount} encyclopedia article${wikiCount === 1 ? "" : "s"}). Click any card to read online or download the full PDF.`;
+    const ieeeCount = ieeeItems.length;
+    const scholarCount = openAlexItems.length + arxivItems.length;
+    const ieeeNote = ieeeCount > 0 ? `${ieeeCount} IEEE Xplore publication${ieeeCount === 1 ? "" : "s"}` : "";
+    const scholarNote = scholarCount > 0 ? `${scholarCount} scientific research paper${scholarCount === 1 ? "" : "s"}` : "";
+    const breakdown = [ieeeNote, scholarNote].filter(Boolean).join(", ");
+
+    finalMessage = `Found ${combinedResults.length} internet research papers and sources for "${rawQ}" (${breakdown || "Scholarly publications"}). Click any card to read directly on IEEE Xplore, view publisher full text, or download PDF.`;
   }
 
   return {
