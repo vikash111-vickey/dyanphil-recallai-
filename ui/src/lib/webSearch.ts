@@ -338,6 +338,111 @@ Provide an authoritative, clear, and comprehensive answer explaining the concept
 }
 
 /**
+ * Clean user query to extract the core topic and detect conversational intent
+ */
+export function extractCoreQuery(rawInput: string): {
+  cleanTopic: string;
+  isGreeting: boolean;
+  isHelp: boolean;
+  isThanks: boolean;
+  askingWord?: string;
+  prefersIeee: boolean;
+} {
+  const trimmed = (rawInput || "").trim();
+  const lower = trimmed.toLowerCase();
+
+  // 1. Check greetings
+  if (/^(hi|hello|hey|hola|namaste|greetings|good morning|good afternoon|good evening)\b[!.? ]*$/i.test(lower)) {
+    return { cleanTopic: "", isGreeting: true, isHelp: false, isThanks: false, prefersIeee: false };
+  }
+
+  // 2. Check general help / about questions
+  if (/^(who are you|what can you do|what is this|help|how does this work|kya kar sakte ho)\b[!.? ]*$/i.test(lower)) {
+    return { cleanTopic: "", isGreeting: false, isHelp: true, isThanks: false, prefersIeee: false };
+  }
+
+  // 3. Check thanks
+  if (/^(thanks|thank you|thx|dhanyawad|shukriya|great thanks)\b[!.? ]*$/i.test(lower)) {
+    return { cleanTopic: "", isGreeting: false, isHelp: false, isThanks: true, prefersIeee: false };
+  }
+
+  let text = lower;
+
+  // Detect asking keywords for natural human phrasing
+  let askingWord: string | undefined;
+  const matchAsk = text.match(/\b(give|show|find|search|get|tell|look|bring)\b/i);
+  if (matchAsk) {
+    askingWord = matchAsk[1].toLowerCase();
+  }
+
+  // Remove common polite / asking prefixes and fillers
+  const prefixPatterns = [
+    /^(please|kindly|can you|could you|would you|will you|i want to|i need to|i'd like to|i would like to)\s+/gi,
+    /^(give me|give|show me|show|find me|find my|find|search for|search|look for|look up|get me|get|bring me|bring)\s+/gi,
+    /^(tell me about|tell me|explain to me|explain|what is|what are|where is|where are|who is|who are)\s+/gi,
+    /^(research papers? (on|about|for)|papers? (on|about|for)|articles? (on|about|for)|publications? (on|about|for))\s+/gi,
+    /^(information (on|about|regarding)|details (on|about|regarding)|info (on|about|regarding))\s+/gi,
+    /^(latest|recent|top|best)\s+/gi,
+    // Hindi / Hinglish phrases
+    /^(mujhe\s+)?(dikhao|dikha\s+do|batao|bata\s+do|dhundo|dhundh\s+ke\s+do|nikalo|kholo)\s+/gi,
+  ];
+
+  let cleaned = text;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const pat of prefixPatterns) {
+      if (pat.test(cleaned)) {
+        cleaned = cleaned.replace(pat, "").trim();
+        changed = true;
+      }
+    }
+  }
+
+  // Strip trailing filler words
+  cleaned = cleaned
+    .replace(/\s+(please|kindly|papers?|articles?|docs?|documents?)$/gi, "")
+    .replace(/[?!.]+$/, "")
+    .trim();
+
+  const prefersIeee = lower.includes("ieee") || lower.includes("xplore");
+
+  return {
+    cleanTopic: cleaned || trimmed,
+    isGreeting: false,
+    isHelp: false,
+    isThanks: false,
+    askingWord,
+    prefersIeee,
+  };
+}
+
+function generateHumanResearchReply(
+  topic: string,
+  askingWord: string | undefined,
+  results: SearchResultItem[],
+  ieeeCount: number
+): string {
+  if (results.length === 0) {
+    return `I couldn't find any direct research papers on "${topic}". You can try searching with related keywords or check IEEE Xplore directly below.`;
+  }
+
+  const top = results[0];
+  const topTitle = top.filename.replace(/\.pdf$/i, "");
+  const authorFact = top.facts?.find((f) => f.kind === "authors" || f.label.toLowerCase().includes("author"));
+  const author = authorFact?.value ? ` by ${authorFact.value}` : "";
+
+  // Capitalize display topic
+  const displayTopic = topic.length > 2 ? topic.charAt(0).toUpperCase() + topic.slice(1) : topic;
+
+  if (ieeeCount > 0 && top.source === "IEEE Xplore") {
+    return `Here are the top peer-reviewed IEEE publications on ${displayTopic}. Leading paper: "${topTitle}"${author}. Full text and open-access PDFs are ready below.`;
+  }
+
+  return `Here are the top research papers on ${displayTopic}. Check out "${topTitle}"${author}. You can read the full text or download the PDF below.`;
+}
+
+/**
  * Execute deep Internet & Scholarly Research across IEEE Xplore, OpenAlex, arXiv, Wikipedia & Gemini AI
  */
 export async function performInternetSearch(query: string, sessionId: string): Promise<AskResponse> {
@@ -352,12 +457,47 @@ export async function performInternetSearch(query: string, sessionId: string): P
     };
   }
 
-  // 1. Fetch from IEEE Xplore, OpenAlex, arXiv, and Wikipedia simultaneously
+  const intent = extractCoreQuery(rawQ);
+
+  // Handle conversational greetings & FAQs naturally like a human
+  if (intent.isGreeting) {
+    return {
+      tone: "friendly",
+      urgency: "normal",
+      message: "Hello! How can I help you today? Ask me to find research papers from IEEE Xplore and arXiv (e.g. 'give me papers on quantum computing' or 'show deep learning research').",
+      session_id: sessionId,
+      results: [],
+    };
+  }
+
+  if (intent.isHelp) {
+    return {
+      tone: "friendly",
+      urgency: "normal",
+      message: "I'm Dyanphil, your AI research assistant. You can ask me to search IEEE Xplore, arXiv, and academic journals for research papers, or switch to 'My Laptop Files' to search your personal documents privately.",
+      session_id: sessionId,
+      results: [],
+    };
+  }
+
+  if (intent.isThanks) {
+    return {
+      tone: "friendly",
+      urgency: "normal",
+      message: "You're very welcome! Feel free to ask whenever you need more research papers or articles.",
+      session_id: sessionId,
+      results: [],
+    };
+  }
+
+  const searchTopic = intent.cleanTopic || rawQ;
+
+  // 1. Fetch from IEEE Xplore, OpenAlex, arXiv, and Wikipedia simultaneously using clean search topic
   const [ieeeRes, openAlexRes, arxivRes, wikiRes] = await Promise.allSettled([
-    searchIeeeXplore(rawQ, 4),
-    searchOpenAlex(rawQ, 3),
-    searchArxiv(rawQ, 3),
-    searchWikipedia(rawQ, 2),
+    searchIeeeXplore(searchTopic, 4),
+    searchOpenAlex(searchTopic, 3),
+    searchArxiv(searchTopic, 3),
+    searchWikipedia(searchTopic, 2),
   ]);
 
   const ieeeItems = ieeeRes.status === "fulfilled" ? ieeeRes.value : [];
@@ -374,11 +514,11 @@ export async function performInternetSearch(query: string, sessionId: string): P
   ];
 
   if (combinedResults.length === 0) {
-    const ieeePortalLink = `https://ieeexplore.ieee.org/search/searchresult.jsp?newsearch=true&queryText=${encodeURIComponent(rawQ)}`;
+    const ieeePortalLink = `https://ieeexplore.ieee.org/search/searchresult.jsp?newsearch=true&queryText=${encodeURIComponent(searchTopic)}`;
     return {
       tone: "neutral",
       urgency: "normal",
-      message: `No direct scientific papers were found for "${rawQ}". You can search IEEE Xplore directly at: ${ieeePortalLink}`,
+      message: `I couldn't find any direct research papers on "${searchTopic}". You can try searching with different keywords or search IEEE Xplore directly at: ${ieeePortalLink}`,
       session_id: sessionId,
       results: [],
     };
@@ -391,18 +531,9 @@ export async function performInternetSearch(query: string, sessionId: string): P
     aiSummary = await askGemini(apiKey, rawQ, combinedResults);
   }
 
-  let finalMessage = "";
-  if (aiSummary) {
-    finalMessage = aiSummary;
-  } else {
-    const ieeeCount = ieeeItems.length;
-    const scholarCount = openAlexItems.length + arxivItems.length;
-    const ieeeNote = ieeeCount > 0 ? `${ieeeCount} IEEE Xplore publication${ieeeCount === 1 ? "" : "s"}` : "";
-    const scholarNote = scholarCount > 0 ? `${scholarCount} scientific research paper${scholarCount === 1 ? "" : "s"}` : "";
-    const breakdown = [ieeeNote, scholarNote].filter(Boolean).join(", ");
-
-    finalMessage = `Found ${combinedResults.length} internet research papers and sources for "${rawQ}" (${breakdown || "Scholarly publications"}). Click any card to read directly on IEEE Xplore, view publisher full text, or download PDF.`;
-  }
+  const finalMessage = aiSummary
+    ? aiSummary
+    : generateHumanResearchReply(searchTopic, intent.askingWord, combinedResults, ieeeItems.length);
 
   return {
     tone: "neutral",

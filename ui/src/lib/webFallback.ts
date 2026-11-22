@@ -225,6 +225,37 @@ export function performClientSearch(query: string, sessionId: string): AskRespon
     };
   }
 
+  // Handle conversational greetings & FAQs naturally like a human
+  if (/^(hi|hello|hey|hola|namaste|greetings|good morning|good evening)\b[!.? ]*$/i.test(q)) {
+    return {
+      tone: "friendly",
+      urgency: "normal",
+      message: "Hello! How can I help you? Ask me to find any document on your laptop, like your passport, electricity bill, or health insurance.",
+      session_id: sessionId,
+      results: [],
+    };
+  }
+
+  if (/^(who are you|what can you do|what is this|help|how does this work)\b[!.? ]*$/i.test(q)) {
+    return {
+      tone: "friendly",
+      urgency: "normal",
+      message: "I'm Dyanphil, your offline private document assistant. I can help you find and open personal documents stored on your laptop with 100% on-device privacy.",
+      session_id: sessionId,
+      results: [],
+    };
+  }
+
+  if (/^(thanks|thank you|thx|dhanyawad|shukriya)\b[!.? ]*$/i.test(q)) {
+    return {
+      tone: "friendly",
+      urgency: "normal",
+      message: "You're very welcome! Let me know if you need any other documents or files.",
+      session_id: sessionId,
+      results: [],
+    };
+  }
+
   // Expand keywords with synonyms
   const searchTerms = new Set<string>();
   for (const token of keywords) {
@@ -334,7 +365,7 @@ export function performClientSearch(query: string, sessionId: string): AskRespon
     return {
       tone: isUrgent ? "urgent" : "neutral",
       urgency: isUrgent ? "high" : "normal",
-      message: `No matching documents found for "${rawQ}". Try searching for specific document names (e.g., passport, insurance, electricity bill, flight ticket, warranty, tax) or click "Grant folder permission once" above to search files from your laptop.`,
+      message: `I couldn't find any documents matching "${rawQ}" on your machine. Try searching for specific document names (like passport, insurance, electricity bill, flight ticket, warranty) or grant folder permission above to index your laptop files.`,
       session_id: sessionId,
       results: [],
     };
@@ -342,6 +373,7 @@ export function performClientSearch(query: string, sessionId: string): AskRespon
 
   const results = filteredMatches.slice(0, 5);
   const top = results[0];
+  const cleanName = top.filename.replace(/_/g, " ").replace(/\.(pdf|docx|txt|xlsx)$/i, "");
   const foundUserLaptopFiles = results.some((m) => m.source === "laptop local");
 
   // Detect specific fact questions (expiry, number/id, amount)
@@ -354,27 +386,27 @@ export function performClientSearch(query: string, sessionId: string): AskRespon
   if (isAskingExpiry) {
     const dateFact = top.facts?.find((f) => f.kind === "date" || f.label.toLowerCase().includes("expir") || f.label.toLowerCase().includes("valid") || f.label.toLowerCase().includes("due"));
     if (dateFact) {
-      message = `${top.filename}: ${dateFact.label} is ${dateFact.value}.`;
+      message = `For your ${cleanName}, the ${dateFact.label.toLowerCase()} is ${dateFact.value}. I've attached your document below.`;
     }
   } else if (isAskingNumber) {
     const idFact = top.facts?.find((f) => f.kind === "id" || f.label.toLowerCase().includes("no") || f.label.toLowerCase().includes("number") || f.label.toLowerCase().includes("pnr") || f.label.toLowerCase().includes("tag"));
     if (idFact) {
-      message = `${top.filename}: ${idFact.label} is ${idFact.value}.`;
+      message = `Here is your ${cleanName}. The ${idFact.label.toLowerCase()} is ${idFact.value}.`;
     }
   } else if (isAskingAmount) {
     const amtFact = top.facts?.find((f) => f.kind === "amount" || f.label.toLowerCase().includes("amount") || f.label.toLowerCase().includes("sum"));
     if (amtFact) {
-      message = `${top.filename}: ${amtFact.label} is ${amtFact.value}.`;
+      message = `For your ${cleanName}, the total ${amtFact.label.toLowerCase()} is ${amtFact.value}.`;
     }
   }
 
   if (!message) {
     if (foundUserLaptopFiles) {
-      message = `Found ${results.length} matching document(s) from your laptop folder (${folderState.folderName || "Local"}): ${top.filename}.`;
+      message = `Here are ${results.length} document(s) from your laptop folder (${folderState.folderName || "Local"}). Top match: ${cleanName}.`;
     } else if (results.length === 1) {
-      message = `Found 1 matching document: ${top.filename}. Details are displayed below.`;
+      message = `Here is your ${cleanName}. Document details and actions are ready below.`;
     } else {
-      message = `Found ${results.length} matching documents for "${rawQ}". Top match: ${top.filename}.`;
+      message = `Here are the top documents matching "${rawQ}". Leading file: ${cleanName}.`;
     }
   }
 

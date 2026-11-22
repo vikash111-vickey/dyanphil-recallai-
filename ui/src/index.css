@@ -248,7 +248,7 @@
 .mo-halo {
   position: absolute;
   left: 50%;
-  top: 46%;
+  top: calc(46% - 36px);
   width: 480px;
   height: 480px;
   transform: translate(-50%, -50%);
@@ -264,7 +264,7 @@
 .mo-mover {
   position: absolute;
   left: 50%;
-  top: 46%;
+  top: calc(46% - 36px);
   width: 0;
   height: 0;
   will-change: transform;
@@ -594,11 +594,26 @@
 
 .mo-a-body {
   margin: 0;
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 13.5px;
+  line-height: 1.45;
   color: rgba(255, 255, 255, 0.92);
   overflow-y: auto;
   max-height: calc(100% - 24px);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+.mo-a-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.mo-a-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.mo-a-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
 }
 
 .mo-w {
@@ -685,7 +700,7 @@
 .mo-reset {
   position: absolute;
   left: 50%;
-  top: calc(46% + 80px);
+  top: calc(46% + 28px);
   transform: translateX(-50%);
   display: none;
   align-items: center;
@@ -700,7 +715,7 @@
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
-  z-index: 15;
+  z-index: 25;
 }
 
 .mo-reset:hover {
