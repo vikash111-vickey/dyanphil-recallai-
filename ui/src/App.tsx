@@ -435,7 +435,7 @@ export default function App() {
 
           <span className="hidden md:inline text-[11px] text-zinc-400">
             {searchMode === "internet"
-              ? "🌐 Searching arXiv papers & Wikipedia"
+              ? "🌐 Searching IEEE Xplore, arXiv & internet"
               : "💻 Searching files on your laptop"}
           </span>
         </div>
@@ -465,13 +465,13 @@ export default function App() {
         </div>
       </div>
 
-      {/* Top Status Bar: Laptop Folder Permission or Internet Research Info */}
-      <div className="absolute top-14 left-0 right-0 flex justify-center z-20 px-4 pointer-events-none">
+      {/* Top Status Bar: In normal document flow so it never collides with top bar buttons */}
+      <div className="w-full flex justify-center py-2 px-4 z-20">
         {searchMode === "laptop" ? (
           <button
             type="button"
             onClick={() => setShowPermissionModal(true)}
-            className="pointer-events-auto flex items-center gap-2 rounded-full border border-zinc-800/80 bg-zinc-950/70 px-3.5 py-1.5 text-[11px] font-medium text-zinc-300 shadow-lg backdrop-blur-md transition-all hover:border-emerald-500/40 hover:bg-zinc-900 hover:text-emerald-300 active:scale-95"
+            className="flex items-center gap-2 rounded-full border border-zinc-800/80 bg-zinc-950/80 px-3.5 py-1.5 text-[11px] font-medium text-zinc-300 shadow-lg backdrop-blur-md transition-all hover:border-emerald-500/40 hover:bg-zinc-900 hover:text-emerald-300 active:scale-95"
             title="Manage local laptop folder permission"
           >
             {localFolderState.granted ? (
@@ -491,10 +491,10 @@ export default function App() {
             )}
           </button>
         ) : (
-          <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-blue-500/30 bg-zinc-950/80 px-3.5 py-1.5 text-[11px] font-medium text-zinc-300 shadow-lg backdrop-blur-md">
+          <div className="flex items-center gap-2 rounded-full border border-blue-500/30 bg-zinc-950/80 px-3.5 py-1.5 text-[11px] font-medium text-zinc-300 shadow-lg backdrop-blur-md">
             <Globe className="w-3.5 h-3.5 text-blue-400" />
             <span>
-              Internet Search Active • <strong className="text-blue-300">arXiv Research Papers & Online Knowledge</strong>
+              Internet Search Active • <strong className="text-blue-300">IEEE Xplore, arXiv & Online Knowledge</strong>
             </span>
           </div>
         )}

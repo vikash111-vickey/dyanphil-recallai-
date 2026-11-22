@@ -29,11 +29,10 @@ function cleanHtmlTags(str: string): string {
  */
 async function searchIeeeXplore(query: string, maxResults = 4): Promise<SearchResultItem[]> {
   const cleanQ = encodeURIComponent(query.trim());
-  // Search IEEE works specifically
   const url = `https://api.crossref.org/works?query=${cleanQ}&filter=prefix:10.1109&rows=${maxResults * 2}`;
 
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout?.(6000) });
     if (!res.ok) return [];
     const data = await res.json();
     const items = data?.message?.items || [];
@@ -114,7 +113,7 @@ async function searchOpenAlex(query: string, maxResults = 3): Promise<SearchResu
   const url = `https://api.openalex.org/works?search=${cleanQ}&per-page=${maxResults}`;
 
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout?.(6000) });
     if (!res.ok) return [];
     const data = await res.json();
     const works = data?.results || [];
@@ -176,66 +175,62 @@ async function searchOpenAlex(query: string, maxResults = 3): Promise<SearchResu
 }
 
 /**
- * Search scientific research papers from arXiv via their public OpenSearch API
+ * Search scientific research papers from arXiv via CORS-enabled OpenAlex repository index
+ * Eliminates browser CORS errors from export.arxiv.org
  */
 async function searchArxiv(query: string, maxResults = 3): Promise<SearchResultItem[]> {
   const cleanQ = encodeURIComponent(query.trim());
-  const url = `https://export.arxiv.org/api/query?search_query=all:${cleanQ}&start=0&max_results=${maxResults}&sortBy=relevance`;
+  // OpenAlex source ID s4306400194 is arXiv.org - supports CORS with access-control-allow-origin: *
+  const url = `https://api.openalex.org/works?search=${cleanQ}&filter=locations.source.id:s4306400194&per-page=${maxResults}`;
 
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout?.(6000) });
     if (!res.ok) return [];
-    const xmlText = await res.text();
-    const parser = new DOMParser();
-    const xml = parser.parseFromString(xmlText, "application/xml");
-    const entries = Array.from(xml.querySelectorAll("entry"));
+    const data = await res.json();
+    const works = data?.results || [];
 
     const items: SearchResultItem[] = [];
 
-    for (const entry of entries) {
-      const title = entry.querySelector("title")?.textContent?.replace(/\s+/g, " ").trim() || "Untitled Research Paper";
-      const summary = entry.querySelector("summary")?.textContent?.replace(/\s+/g, " ").trim() || "";
-      const published = entry.querySelector("published")?.textContent?.slice(0, 10) || "";
-      const idUrl = entry.querySelector("id")?.textContent?.trim() || "";
+    for (const w of works) {
+      const title = w.display_name || w.title || "arXiv Preprint";
+      const pubYear = w.publication_year ? String(w.publication_year) : "";
+      const landingUrl = w.primary_location?.landing_page_url || (w.doi ? `https://doi.org/${w.doi.replace(/^https?:\/\/doi.org\//, "")}` : w.id);
+      const pdfUrl = w.open_access?.oa_url || w.primary_location?.pdf_url || "";
 
-      let paperUrl = idUrl;
-      let pdfUrl = "";
-      const links = Array.from(entry.querySelectorAll("link"));
-      for (const link of links) {
-        const href = link.getAttribute("href") || "";
-        const titleAttr = link.getAttribute("title");
-        if (titleAttr === "pdf" || href.includes("/pdf/")) {
-          pdfUrl = href.endsWith(".pdf") ? href : `${href}.pdf`;
-        } else if (link.getAttribute("rel") === "alternate") {
-          paperUrl = href;
-        }
-      }
-      if (!pdfUrl && idUrl.includes("/abs/")) {
-        pdfUrl = idUrl.replace("/abs/", "/pdf/") + ".pdf";
-      }
+      const authors = (w.authorships || [])
+        .map((a: any) => a.author?.display_name)
+        .filter(Boolean)
+        .slice(0, 3)
+        .join(", ");
+      const authorsStr = authors ? (w.authorships?.length > 3 ? `${authors} et al.` : authors) : "arXiv Researchers";
 
-      const authors = Array.from(entry.querySelectorAll("author > name"))
-        .map((n) => n.textContent?.trim() || "")
-        .filter(Boolean);
-      const authorsStr = authors.slice(0, 3).join(", ") + (authors.length > 3 ? " et al." : "");
-      const cat = entry.querySelector("primary_category")?.getAttribute("term") || "Research";
+      const topic = w.primary_topic?.display_name || "";
+      const field = w.primary_topic?.field?.display_name || "";
+      const citedCount = w.cited_by_count ? `Cited by ${w.cited_by_count} papers` : "";
+
+      const snippet = [
+        topic ? `Topic: ${topic}.` : "",
+        field ? `Field: ${field}.` : "",
+        citedCount ? `${citedCount}.` : "",
+        "Preprint indexed from arXiv.org. Access full paper online or download open-access PDF.",
+      ].filter(Boolean).join(" ");
 
       items.push({
         filename: `${title}.pdf`,
-        path: paperUrl || idUrl,
-        breadcrumb: ["Internet", "Research Papers", `arXiv:${cat}`, `${title.slice(0, 30)}...`],
-        source: "arXiv Research",
-        modified: published,
-        snippet: summary.slice(0, 320) + (summary.length > 320 ? "..." : ""),
+        path: landingUrl || w.id,
+        breadcrumb: ["Internet", "Research Papers", "arXiv.org", `${title.slice(0, 30)}...`],
+        source: "arXiv.org",
+        modified: pubYear || "Recent",
+        snippet,
         match_type: "research",
         exists: true,
         doc_type: "research_paper",
-        url: paperUrl || idUrl,
+        url: landingUrl || w.id,
         pdf_url: pdfUrl,
         facts: [
-          { kind: "authors", label: "Authors", value: authorsStr || "Researchers" },
-          { kind: "date", label: "Published", value: published, value_date: published },
-          { kind: "category", label: "Category", value: `arXiv:${cat}` },
+          { kind: "authors", label: "Authors", value: authorsStr },
+          { kind: "source", label: "Repository", value: "arXiv.org" },
+          { kind: "date", label: "Year", value: pubYear, value_date: pubYear },
         ],
       });
     }
@@ -255,7 +250,7 @@ async function searchWikipedia(query: string, maxResults = 2): Promise<SearchRes
   const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${cleanQ}&format=json&origin=*&srlimit=${maxResults}`;
 
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout?.(5000) });
     if (!res.ok) return [];
     const data = await res.json();
     const hits = data?.query?.search || [];
@@ -317,6 +312,7 @@ Provide an authoritative, clear, and comprehensive answer explaining the concept
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout?.(12000),
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
