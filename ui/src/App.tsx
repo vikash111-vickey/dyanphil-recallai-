@@ -1,12 +1,14 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Clock, Shield, AlertCircle, X, Settings, ShieldCheck, Lock, ExternalLink, HardDrive } from "lucide-react";
+import { Clock, Shield, AlertCircle, X, Settings, ShieldCheck, Lock, ExternalLink, HardDrive, Globe, Key, Sparkles } from "lucide-react";
 import MorphOrb from "@/components/ui/ai-thiking-orb-and-input";
 import { ResultsPanel, AskResponse, SearchResultItem } from "@/components/ResultsPanel";
 import { VaultPinModal } from "@/components/VaultPinModal";
 import { VaultPanel } from "@/components/VaultPanel";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { PermissionModal } from "@/components/PermissionModal";
+import { ApiKeyModal } from "@/components/ApiKeyModal";
 import { performClientSearch, SAMPLE_DOCUMENTS } from "@/lib/webFallback";
+import { performInternetSearch, getStoredApiKey } from "@/lib/webSearch";
 import { getLocalFolderState, LocalFolderState } from "@/lib/localFileScanner";
 
 interface ExpiringItem {
@@ -45,6 +47,15 @@ export default function App() {
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [localFolderState, setLocalFolderState] = useState<LocalFolderState>(getLocalFolderState);
 
+  // Search mode: "internet" (search arXiv papers & web info) vs "laptop" (search local computer files)
+  const isWebMode =
+    typeof window !== "undefined" &&
+    window.location.hostname !== "127.0.0.1" &&
+    window.location.hostname !== "localhost";
+  const [searchMode, setSearchMode] = useState<"internet" | "laptop">(() => (isWebMode ? "internet" : "laptop"));
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [hasApiKey, setHasApiKey] = useState<boolean>(() => Boolean(getStoredApiKey()));
+
   const [askData, setAskData] = useState<AskResponse | null>(null);
   const [showResults, setShowResults] = useState(false);
   const [currentPhase, setCurrentPhase] = useState<string>("idle");
@@ -68,6 +79,22 @@ export default function App() {
     setShowVaultPanel(false);
     setShowSettingsPanel(false);
 
+    // MODE 1: Internet Browser & Research Papers Mode
+    if (searchMode === "internet") {
+      try {
+        const internetData = await performInternetSearch(text, sessionId);
+        setAskData(internetData);
+        setShowResults(true);
+        setTimeout(() => {
+          resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 1400);
+        return internetData.message;
+      } catch (err) {
+        console.warn("Internet research search error:", err);
+      }
+    }
+
+    // MODE 2: Laptop Files Mode (only if laptop mode is chosen)
     // 1. Detect if connected to local Python backend (127.0.0.1 or localhost)
     const isLocalBackend =
       (window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost") &&
@@ -99,7 +126,7 @@ export default function App() {
       }
     }
 
-    // 2. On Web / PWA (Firebase): Instant on-device local search
+    // 2. On Web / PWA (Firebase): On-device local search of user's laptop folder
     const fallbackData = performClientSearch(text, sessionId);
     setAskData(fallbackData);
     setShowResults(true);
@@ -354,59 +381,123 @@ export default function App() {
     currentPhase === "reset" ||
     currentPhase === "answered";
 
-  const isWebMode =
-    typeof window !== "undefined" &&
-    window.location.hostname !== "127.0.0.1" &&
-    window.location.hostname !== "localhost";
-
   return (
     <div
       className="relative min-h-screen w-full bg-[#050508] text-[#f4f4f5] flex flex-col items-center selection:bg-emerald-500/30"
       onClick={handleContainerClick}
     >
-      {/* Cloud Web Mode Warning & Quick Switch to Local Laptop App */}
-      {isWebMode && (
-        <div className="w-full bg-gradient-to-r from-amber-950/90 via-zinc-950 to-emerald-950/90 border-b border-amber-500/30 px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-200 z-50">
-          <div className="flex items-center gap-2">
-            <HardDrive className="w-4 h-4 text-emerald-400 shrink-0" />
+      {/* Top Banner: Mode Selector & Laptop / API Key Actions */}
+      <div className="w-full bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 border-b border-zinc-800/80 px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-200 z-50">
+        {/* Left: Search Mode Toggle */}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center p-0.5 rounded-xl border border-zinc-800 bg-zinc-950 shadow-inner">
+            <button
+              type="button"
+              onClick={() => {
+                setSearchMode("internet");
+                showToast("Switched to Internet & Research Papers search mode.");
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                searchMode === "internet"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900"
+              }`}
+              title="Search online research papers from arXiv, Wikipedia, and internet articles"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span>Internet & Research</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSearchMode("laptop");
+                if (!localFolderState.granted && isWebMode) {
+                  setShowPermissionModal(true);
+                } else {
+                  showToast("Switched to Laptop Files search mode.");
+                }
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                searchMode === "laptop"
+                  ? "bg-emerald-600 text-white shadow-sm"
+                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900"
+              }`}
+              title="Search personal documents and files stored on your laptop"
+            >
+              <HardDrive className="w-3.5 h-3.5" />
+              <span>My Laptop Files</span>
+              {localFolderState.granted && (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              )}
+            </button>
+          </div>
+
+          <span className="hidden md:inline text-[11px] text-zinc-400">
+            {searchMode === "internet"
+              ? "🌐 Searching arXiv papers & Wikipedia"
+              : "💻 Searching files on your laptop"}
+          </span>
+        </div>
+
+        {/* Right: API Key & Open on Laptop */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowApiKeyModal(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 px-3 py-1.5 font-medium text-xs transition-colors"
+            title="Configure Google Gemini API Key for deep AI synthesis"
+          >
+            <Key className="w-3.5 h-3.5 text-indigo-400" />
+            <span>{hasApiKey ? "AI Key Active ✓" : "Add Gemini API Key"}</span>
+          </button>
+
+          {isWebMode && (
+            <a
+              href="http://127.0.0.1:8000"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 px-3 py-1.5 font-semibold text-xs shadow-md transition-all active:scale-95 shrink-0"
+              title="Open native laptop app on http://127.0.0.1:8000"
+            >
+              <span>Open on Laptop</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          )}
+        </div>
+      </div>
+
+      {/* Top Status Bar: Laptop Folder Permission or Internet Research Info */}
+      <div className="absolute top-14 left-0 right-0 flex justify-center z-20 px-4 pointer-events-none">
+        {searchMode === "laptop" ? (
+          <button
+            type="button"
+            onClick={() => setShowPermissionModal(true)}
+            className="pointer-events-auto flex items-center gap-2 rounded-full border border-zinc-800/80 bg-zinc-950/70 px-3.5 py-1.5 text-[11px] font-medium text-zinc-300 shadow-lg backdrop-blur-md transition-all hover:border-emerald-500/40 hover:bg-zinc-900 hover:text-emerald-300 active:scale-95"
+            title="Manage local laptop folder permission"
+          >
+            {localFolderState.granted ? (
+              <>
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <span>
+                  Laptop Folder: <strong className="text-emerald-300 font-semibold">{localFolderState.folderName}</strong> ({localFolderState.fileCount} files) • 100% On-Device
+                </span>
+              </>
+            ) : (
+              <>
+                <Lock className="w-3.5 h-3.5 text-amber-400" />
+                <span>
+                  Laptop File Access: <strong className="text-amber-300 underline underline-offset-2">Click to select laptop folder</strong> • 0% Cloud Upload
+                </span>
+              </>
+            )}
+          </button>
+        ) : (
+          <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-blue-500/30 bg-zinc-950/80 px-3.5 py-1.5 text-[11px] font-medium text-zinc-300 shadow-lg backdrop-blur-md">
+            <Globe className="w-3.5 h-3.5 text-blue-400" />
             <span>
-              You are on the <strong>Google Cloud Web Preview</strong>. To open files natively on your laptop (in Word, Acrobat, Notepad & File Explorer), open your local laptop app:
+              Internet Search Active • <strong className="text-blue-300">arXiv Research Papers & Online Knowledge</strong>
             </span>
           </div>
-          <a
-            href="http://127.0.0.1:8000"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 px-3.5 py-1.5 font-semibold text-xs shadow-md transition-all active:scale-95 shrink-0"
-          >
-            <span>Open on Laptop (http://127.0.0.1:8000)</span>
-            <ExternalLink className="w-3.5 h-3.5" />
-          </a>
-        </div>
-      )}
-
-      {/* Top Privacy & Laptop Permission Status Bar */}
-      <div className={`absolute ${isWebMode ? "top-14" : "top-4"} left-0 right-0 flex justify-center z-20 px-4 pointer-events-none`}>
-        <button
-          type="button"
-          onClick={() => setShowPermissionModal(true)}
-          className="pointer-events-auto flex items-center gap-2 rounded-full border border-zinc-800/80 bg-zinc-950/70 px-3.5 py-1.5 text-[11px] font-medium text-zinc-300 shadow-lg backdrop-blur-md transition-all hover:border-emerald-500/40 hover:bg-zinc-900 hover:text-emerald-300 active:scale-95"
-          title="Manage local laptop folder permission"
-        >
-          {localFolderState.granted ? (
-            <>
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>
-                Laptop Folder: <strong className="text-emerald-300 font-semibold">{localFolderState.folderName}</strong> ({localFolderState.fileCount} files) • 100% On-Device
-              </span>
-            </>
-          ) : (
-            <>
-              <Lock className="w-3.5 h-3.5 text-amber-400" />
-              <span>
-                Laptop File Access: <strong className="text-amber-300 underline underline-offset-2">Grant folder permission once</strong> • 0% Cloud Upload
-              </span>
-            </>
-          )}
-        </button>
+        )}
       </div>
 
       {/* MorphOrb Section */}
@@ -533,6 +624,16 @@ export default function App() {
           const newState = getLocalFolderState();
           setLocalFolderState(newState);
           showToast(`Permission granted! Indexed ${count} file(s) from "${folderName}" locally on this laptop.`);
+        }}
+      />
+
+      {/* Google Gemini API Key Modal */}
+      <ApiKeyModal
+        open={showApiKeyModal}
+        onClose={() => setShowApiKeyModal(false)}
+        onSaved={(key) => {
+          setHasApiKey(Boolean(key));
+          showToast(key ? "Google Gemini API key saved!" : "API key removed.");
         }}
       />
 

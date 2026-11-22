@@ -8,6 +8,8 @@ import {
   Clock,
   ExternalLink,
   Shield,
+  Download,
+  Globe,
 } from "lucide-react";
 import { maskSensitiveData } from "@/lib/masking";
 
@@ -29,6 +31,8 @@ export interface SearchResultItem {
   exists: boolean;
   doc_type?: string;
   facts?: FactItem[];
+  url?: string;
+  pdf_url?: string;
 }
 
 export interface AskResponse {
@@ -244,6 +248,10 @@ function ResultCard({
         return "bg-amber-500/10 text-amber-400 border-amber-500/30";
       case "expired":
         return "bg-rose-500/10 text-rose-400 border-rose-500/30";
+      case "research":
+        return "bg-blue-500/15 text-blue-300 border-blue-500/40";
+      case "knowledge":
+        return "bg-emerald-500/15 text-emerald-300 border-emerald-500/40";
       default:
         return "bg-zinc-800 text-zinc-300 border-zinc-700";
     }
@@ -327,59 +335,115 @@ function ResultCard({
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleOpenFile}
-            disabled={!item.exists || openingFile}
-            className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-            title="Open file with default program"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-            <span>{openingFile ? "Opening..." : "Open file"}</span>
-          </button>
+          {item.url || item.pdf_url ? (
+            <>
+              {item.url && (
+                <a
+                  href={item.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-300 transition-colors hover:bg-blue-500/20 hover:text-white"
+                  title="Open paper or article in web browser"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  <span>Read online</span>
+                </a>
+              )}
+              {item.pdf_url && (
+                <a
+                  href={item.pdf_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300 transition-colors hover:bg-emerald-500/20 hover:text-white"
+                  title="Directly download and view PDF research paper"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>Download PDF</span>
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={async () => {
+                  const link = item.pdf_url || item.url || item.path;
+                  const ok = await copyToClipboard(link);
+                  if (ok) {
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }
+                }}
+                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-white/10 hover:text-white"
+                title="Copy link"
+              >
+                {copied ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 text-emerald-400" />
+                    <span className="text-emerald-400">Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3.5 w-3.5" />
+                    <span>Copy link</span>
+                  </>
+                )}
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={handleOpenFile}
+                disabled={!item.exists || openingFile}
+                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                title="Open file with default program"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                <span>{openingFile ? "Opening..." : "Open file"}</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={handleOpenFolder}
-            disabled={!item.exists || openingFolder}
-            className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-            title="Reveal file in File Explorer"
-          >
-            <FolderOpen className="h-3.5 w-3.5" />
-            <span>{openingFolder ? "Opening..." : "Open folder"}</span>
-          </button>
+              <button
+                type="button"
+                onClick={handleOpenFolder}
+                disabled={!item.exists || openingFolder}
+                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                title="Reveal file in File Explorer"
+              >
+                <FolderOpen className="h-3.5 w-3.5" />
+                <span>{openingFolder ? "Opening..." : "Open folder"}</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={handleCopyPath}
-            disabled={!item.exists}
-            className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-            title="Copy path to clipboard"
-          >
-            {copied ? (
-              <>
-                <Check className="h-3.5 w-3.5 text-emerald-400" />
-                <span className="text-emerald-400">Copied</span>
-              </>
-            ) : (
-              <>
-                <Copy className="h-3.5 w-3.5" />
-                <span>Copy path</span>
-              </>
-            )}
-          </button>
+              <button
+                type="button"
+                onClick={handleCopyPath}
+                disabled={!item.exists}
+                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                title="Copy path to clipboard"
+              >
+                {copied ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 text-emerald-400" />
+                    <span className="text-emerald-400">Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3.5 w-3.5" />
+                    <span>Copy path</span>
+                  </>
+                )}
+              </button>
 
-          {onPinToVault && (
-            <button
-              type="button"
-              onClick={() => onPinToVault(item)}
-              disabled={!item.exists}
-              className="flex items-center gap-1.5 rounded-lg border border-purple-500/30 bg-purple-500/10 px-3 py-1.5 text-xs font-medium text-purple-300 transition-colors hover:border-purple-500/50 hover:bg-purple-500/20 hover:text-purple-200 disabled:cursor-not-allowed disabled:opacity-40"
-              title="Pin document to Emergency Vault"
-            >
-              <Shield className="h-3.5 w-3.5" />
-              <span>Pin to Vault</span>
-            </button>
+              {onPinToVault && (
+                <button
+                  type="button"
+                  onClick={() => onPinToVault(item)}
+                  disabled={!item.exists}
+                  className="flex items-center gap-1.5 rounded-lg border border-purple-500/30 bg-purple-500/10 px-3 py-1.5 text-xs font-medium text-purple-300 transition-colors hover:border-purple-500/50 hover:bg-purple-500/20 hover:text-purple-200 disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Pin document to Emergency Vault"
+                >
+                  <Shield className="h-3.5 w-3.5" />
+                  <span>Pin to Vault</span>
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
