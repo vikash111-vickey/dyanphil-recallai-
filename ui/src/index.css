@@ -220,7 +220,7 @@
 .mo-root {
   position: relative;
   width: 100%;
-  min-height: calc(100vh - 90px);
+  min-height: calc(100vh - 150px);
   overflow: hidden;
   background: #050508;
   color: #f4f4f5;
